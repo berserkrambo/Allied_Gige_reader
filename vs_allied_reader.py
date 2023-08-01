@@ -3,7 +3,6 @@ from threading import Thread, Lock, Event
 
 import cv2
 import numpy as np
-import copy
 from vmbpy import *
 
 
@@ -29,6 +28,8 @@ class Allied_cam(Thread):
         self.cam_id = cam_id
         self.camera = None
         self.frame = None
+        self._fps = 0.0
+        self.t0 = 0
 
         with VmbSystem.get_instance() as vmb:
             self.camera = vmb.get_camera_by_id(self.cam_id)
@@ -43,13 +44,15 @@ class Allied_cam(Thread):
 
     def frame_handler(self, cam: Camera, stream: Stream, frame: Frame):
         if frame.get_status() == FrameStatus.Complete:
-            self.frame = copy.deepcopy(frame.as_opencv_image())
-            # if frame.get_pixel_format() == PixelFormat.Bgr8:
-            #     self.frame = copy.deepcopy(frame.as_opencv_image())
-            # else:
-            #     # This creates a copy of the frame. The original `frame` object can be requeued
-            #     # safely while `display` is used
-            #     self.frame = copy.deepcopy(frame.convert_pixel_format(PixelFormat.Bgr8).as_opencv_image())
+            if self.t0 == 0:
+                self.t0 = time.time()
+            else:
+                t = time.time()
+                self._fps = 1 / (t - self.t0)
+                self.t0 = t
+
+            with self.lock:
+                self.frame = frame.as_opencv_image().copy()
 
         cam.queue_frame(frame)
 
@@ -117,7 +120,7 @@ class Allied_cam(Thread):
 
     def get_next_frame(self):
         with self.lock:
-            return copy.deepcopy(self.frame)
+            return self.frame
 
 class AlliedReader():
     def __init__(self, cam_ids):
@@ -164,6 +167,7 @@ if __name__ == '__main__':
             print("frame is None")
             time.sleep(1)
             continue
+
         frame = frames[current_cam-1]
         cv2.imshow("cam", cv2.resize(frame, (0,0), fx=0.2, fy=0.2))
         k = cv2.waitKey(1)
@@ -173,5 +177,11 @@ if __name__ == '__main__':
 
         if k in range(1, len(cam_ids)):
             current_cam = k
+
+        try:
+            fps = caps.cameras[current_cam - 1]._fps
+        except:
+            fps = 0
+        print(f"\rfps: {fps}", end='')
 
     caps.release()
