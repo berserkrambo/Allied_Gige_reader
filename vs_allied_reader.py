@@ -56,19 +56,20 @@ class Allied_cam(Thread):
 
         cam.queue_frame(frame)
 
-    def setup_camera(self, cam):
+    def setup_camera(self, cam, exposure=5000):
         try:
-            cam.ExposureAuto.set('Continuous')
-
+            # cam.ExposureAuto.set('Continuous') if continuous else cam.ExposureAuto.set('Once')
+            cam.ExposureAuto.set('Off')
+            cam.ExposureTime.set(1000)
+            cam.GainAuto.set("Off")
         except (AttributeError, VmbFeatureError):
-            pass
+            raise AttributeError("failed to set exposure")
 
         # Enable white balancing if camera supports it
-        try:
-            cam.BalanceWhiteAuto.set('Continuous')
-
-        except (AttributeError, VmbFeatureError):
-            pass
+        # try:
+        #     cam.BalanceWhiteAuto.set('Continuous') if continuous else cam.BalanceWhiteAuto.set('Once')
+        # except (AttributeError, VmbFeatureError):
+        #     raise AttributeError("failed to set balance")
 
         # Try to adjust GeV packet size. This Feature is only available for GigE - Cameras.
         try:
@@ -113,7 +114,8 @@ class Allied_cam(Thread):
         with VmbSystem.get_instance() as vmb:
             with self.camera:
                 try:
-                    self.camera.start_streaming(handler=self.frame_handler, buffer_count=1)
+                    # self.camera.start_streaming(handler=self.frame_handler, buffer_count=5) # todo: indafare sul buffer_count
+                    self.camera.start_streaming(handler=self.frame_handler)
                     self.killswitch.wait()
                 finally:
                     self.camera.stop_streaming()
@@ -151,13 +153,11 @@ class AlliedReader():
 
 
 
-
-if __name__ == '__main__':
-
+def read_cl():
     cam_ids = get_cam_ids()
     caps = AlliedReader(cam_ids)
 
-    current_cam = 1 # 1 to N perchè è più comodo sulla tastiera
+    current_cam = 1  # 1 to N perchè è più comodo sulla tastiera
 
     while True:
         t0 = time.time()
@@ -168,8 +168,8 @@ if __name__ == '__main__':
             time.sleep(1)
             continue
 
-        frame = frames[current_cam-1]
-        cv2.imshow("cam", cv2.resize(frame, (0,0), fx=0.2, fy=0.2))
+        frame = frames[current_cam - 1]
+        cv2.imshow("cam", cv2.resize(frame, (0, 0), fx=0.2, fy=0.2))
         k = cv2.waitKey(1)
 
         if k == ord('q') or k == 27:
@@ -185,3 +185,8 @@ if __name__ == '__main__':
         print(f"\rfps: {fps}", end='')
 
     caps.release()
+
+
+if __name__ == '__main__':
+
+    read_cl()
