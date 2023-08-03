@@ -1,8 +1,8 @@
 import time
-from threading import Thread, Lock, Event
+from threading import Thread, Event
+from queue import Queue
 
 import cv2
-import numpy as np
 from vmbpy import *
 
 
@@ -20,10 +20,10 @@ def get_cam_ids():
 
 class Allied_cam(Thread):
 
-    def __init__(self, cam_id):
+    def __init__(self, cam_id, exposure, gain, queue):
         super().__init__()
         self.killswitch = Event()
-        self.lock = Lock()
+        self.queue = queue
 
         self.cam_id = cam_id
         self.camera = None
@@ -35,7 +35,7 @@ class Allied_cam(Thread):
             self.camera = vmb.get_camera_by_id(self.cam_id)
             print("camera id set")
             with self.camera as cam:
-                self.setup_camera(cam)
+                self.setup_camera(cam, exposure, gain)
                 print("camera setup")
                 self.setup_pixel_format(cam)
                 print("camera pixel set")
@@ -51,27 +51,17 @@ class Allied_cam(Thread):
                 self._fps = 1 / (t - self.t0)
                 self.t0 = t
 
-            with self.lock:
-                self.frame = frame.as_opencv_image().copy()
+            self.queue.put_nowait(frame.as_opencv_image())
 
         cam.queue_frame(frame)
 
-    def setup_camera(self, cam, exposure=5000):
+    def setup_camera(self, cam, exposure, gain):
         try:
-            # cam.ExposureAuto.set('Continuous') if continuous else cam.ExposureAuto.set('Once')
-            cam.ExposureAuto.set('Off')
-            cam.ExposureTime.set(1000)
-            cam.GainAuto.set("Off")
+            cam.ExposureTime.set(exposure)
+            cam.Gain.set(gain)
         except (AttributeError, VmbFeatureError):
             raise AttributeError("failed to set exposure")
 
-        # Enable white balancing if camera supports it
-        # try:
-        #     cam.BalanceWhiteAuto.set('Continuous') if continuous else cam.BalanceWhiteAuto.set('Once')
-        # except (AttributeError, VmbFeatureError):
-        #     raise AttributeError("failed to set balance")
-
-        # Try to adjust GeV packet size. This Feature is only available for GigE - Cameras.
         try:
             stream = cam.get_streams()[0]
             stream.GVSPAdjustPacketSize.run()
@@ -120,33 +110,26 @@ class Allied_cam(Thread):
                 finally:
                     self.camera.stop_streaming()
 
-    def get_next_frame(self):
-        with self.lock:
-            return self.frame
-
 class AlliedReader():
-    def __init__(self, cam_ids):
+    def __init__(self, cam_id, exposure=175, gain=15):
         super().__init__()
+        self.queue = Queue()
 
-        if isinstance(cam_ids, str):
-            cam_ids = [cam_ids]
-        self.cam_ids = cam_ids
+        assert isinstance(cam_id, str), "cam_id has to be a string"
+        self.cam_id = cam_id
 
-        self.len = len(self.cam_ids)
-        self.cameras = [Allied_cam(cam_id=c_id) for c_id in self.cam_ids]
-        self.stop = False
-        self.frames = [None for c_id in self.cam_ids]
-        ## possibile synch script ##
+        self.len = len(self.cam_id)
+        self.cam = Allied_cam(cam_id=self.cam_id, exposure=exposure, gain=gain, queue=self.queue)
+        ## possibile future synch script ##
 
-        [cb.start() for cb in self.cameras]
+        self.cam.start()
 
 
     def release(self):
-        [cb.stop() for cb in self.cameras]
+        self.cam.stop()
 
     def get_next_frames(self):
-        self.frames = [cb.get_next_frame() for cb in self.cameras]
-        return self.frames
+        return self.queue.get()
 
     def __del__(self):
         self.release()
@@ -155,20 +138,13 @@ class AlliedReader():
 
 def read_cl():
     cam_ids = get_cam_ids()
-    caps = AlliedReader(cam_ids)
-
-    current_cam = 1  # 1 to N perchè è più comodo sulla tastiera
+    cap = AlliedReader(cam_ids)
 
     while True:
         t0 = time.time()
 
-        frames = caps.get_next_frames()
-        if any(frame is None for frame in frames):
-            print("frame is None")
-            time.sleep(1)
-            continue
+        frame = cap.get_next_frames()
 
-        frame = frames[current_cam - 1]
         cv2.imshow("cam", cv2.resize(frame, (0, 0), fx=0.2, fy=0.2))
         k = cv2.waitKey(1)
 
@@ -179,12 +155,14 @@ def read_cl():
             current_cam = k
 
         try:
-            fps = caps.cameras[current_cam - 1]._fps
+            fps = cap.cam._fps
         except:
             fps = 0
         print(f"\rfps: {fps}", end='')
 
-    caps.release()
+
+
+    cap.release()
 
 
 if __name__ == '__main__':
