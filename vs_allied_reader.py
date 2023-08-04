@@ -13,8 +13,8 @@ def get_cam_ids():
         assert len(cams) > 0, "no camera found" \
                               ""
         print('Cameras found: {}'.format(len(cams)))
-        for cam in cams:
-            print(f"acquiring from: {cam.get_id()}\n")
+        for ci, cam in enumerate(cams):
+            print(f"camera {ci}: {cam.get_id()}\n")
 
         return [cam.get_id() for cam in cams]
 
@@ -111,7 +111,7 @@ class Allied_cam(Thread):
                     self.camera.stop_streaming()
 
 class AlliedReader():
-    def __init__(self, cam_id, exposure=175, gain=15):
+    def __init__(self, cam_id, exposure, gain):
         super().__init__()
         self.queue = Queue()
 
@@ -136,13 +136,18 @@ class AlliedReader():
 
 
 
-def read_cl():
+if __name__ == '__main__':
+
     cam_ids = get_cam_ids()
-    cap = AlliedReader(cam_ids)
+    idc = int(input(f"INPUT - Select camera from the above list: "))
+    assert idc in range(0, len(cam_ids)), "wrong input"
+
+    exposure = 175
+    gain = 15
+
+    cap = AlliedReader(cam_id=cam_ids[idc], exposure=exposure, gain=gain)
 
     while True:
-        t0 = time.time()
-
         frame = cap.get_next_frames()
 
         cv2.imshow("cam", cv2.resize(frame, (0, 0), fx=0.2, fy=0.2))
@@ -151,20 +156,10 @@ def read_cl():
         if k == ord('q') or k == 27:
             break
 
-        if k in range(1, len(cam_ids)):
-            current_cam = k
-
         try:
             fps = cap.cam._fps
         except:
             fps = 0
         print(f"\rfps: {fps}", end='')
 
-
-
     cap.release()
-
-
-if __name__ == '__main__':
-
-    read_cl()
